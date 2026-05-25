@@ -24,7 +24,7 @@
 
 ---
 
-## 3. Issues Faced and Fixes
+## 3. Setup Issues Faced and Fixes
 
 ### Issue 1 — PostgreSQL Version Incompatibility
 **Error:** esim-cloud_db_1 container exited with error code 1.
@@ -52,13 +52,6 @@
 **Result:** All migrations completed successfully.
   "Installed 35 object(s) from 1 fixture(s)"
 
-### Issue 3 — CairoSVG Warning (Non-Critical)
-**Warning:** "Failed to import CairoSVG. drawSvg will be unable to output
-  PNG or other raster image formats."
-**Root Cause:** libcairo library not installed in the Docker container.
-**Impact:** Does not affect circuit simulation or core functionality.
-**Status:** Noted for future reference.
-
 ---
 
 ## 4. Current System State
@@ -72,32 +65,78 @@
 - esim-cloud_db_1              — Up (port 5432) — PostgreSQL 13
 - esim-cloud_redis_1           — Up (port 6379) — Job queue
 
-### Verified Working:
-- Home page: http://localhost/ ✓
-- eSim editor: http://localhost/eda ✓
-- Component list loads ✓
-- Schematic canvas loads ✓
-- Arduino simulator: http://localhost:4200 ✓
-- Admin panel: http://localhost/api/admin ✓
+---
+
+## 5. Features Tested
+
+### Working Features ✅
+1. eSim editor loads correctly
+2. Component list loads with all libraries
+3. Drag and drop components onto canvas
+4. Wire connections between components
+5. Transient Analysis — correct waveform output
+6. DC Sweep — correct graph output
+7. DC Solver — correct node voltage table
+8. AC Analysis — correct graph output
+9. SPICE Simulator (direct netlist input) — working
+10. Gallery page — loads 6 example circuits with images
+11. Gallery circuits open correctly in editor
+12. Undo (Ctrl+Z) — working
+13. Save dialog appears correctly
+14. Admin panel — fully working with all models
+
+### Issues Found ❌
+
+#### Issue 1 — Copy Paste not working
+**Feature:** Ctrl+C and Ctrl+V on components
+**Expected:** Selected component should be copied and pasted
+**Actual:** Nothing happens
+**Note:** This was attempted by a 2024 fellow but could not be completed.
+  The root cause is that mxGraph XML export strips pin metadata,
+  making it impossible to reconnect pasted components to the circuit.
+
+#### Issue 2 — Redo not working
+**Feature:** Ctrl+Shift+Z
+**Expected:** Redo the last undone action
+**Actual:** Nothing happens
+**Note:** Undo (Ctrl+Z) works correctly but Redo is broken.
+
+#### Issue 3 — Ctrl+Drag to duplicate not working
+**Feature:** Hold Ctrl and drag a component to create a duplicate
+**Expected:** A copy of the component should be created
+**Actual:** Nothing happens — component just moves
+
+#### Issue 4 — Ctrl+R keyboard shortcut conflict
+**Feature:** Ctrl+R should rotate selected component
+**Actual:** Browser refresh is triggered instead
+**Note:** Rotate works through the toolbar icon but keyboard
+  shortcut is intercepted by the browser.
+
+#### Issue 5 — Noise Analysis incorrect output
+**Feature:** Noise Analysis simulation
+**Expected:** Noise spectrum data for the circuit
+**Actual:** Shows ngspice internal constants instead of circuit data:
+  V(false), V(true), V(boltz), V(pi), V(kelvin), V(c) etc.
+**Impact:** Noise Analysis feature is effectively broken.
 
 ---
 
-## 5. Current Tech Stack
+## 6. Current Tech Stack
 
-| Component      | Version        |
-|----------------|----------------|
-| Django         | 2.2.12         |
-| React          | 16.14.0        |
-| Angular        | 7.2.0          |
-| PostgreSQL     | 13             |
-| ngspice        | 31             |
-| Node.js (CI)   | 10.5.0         |
-| Celery         | 4.4.2          |
-| Python         | 3.7            |
+| Component      | Version   |
+|----------------|-----------|
+| Django         | 2.2.12    |
+| React          | 16.14.0   |
+| Angular        | 7.2.0     |
+| PostgreSQL     | 13        |
+| ngspice        | 31        |
+| Node.js (CI)   | 10.5.0    |
+| Celery         | 4.4.2     |
+| Python         | 3.7       |
 
 ---
 
-## 6. Repository Links
+## 7. Repository Links
 
 - My Fork: https://github.com/ImranFarhat01/eSim-Cloud
 - Upstream (FOSSEE): https://github.com/FOSSEE/eSim-Cloud
