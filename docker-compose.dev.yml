@@ -19,10 +19,10 @@ services:
 
   eda-frontend:
     image: "docker.pkg.github.com/frg-fossee/esim-cloud/eda-frontend:dev"
-    build: ./eda-frontend/
+    build: ./eda-frontend/          
     command: >
       sh -c "npm install &&
-             npm start"
+             npx ng serve --disableHostCheck --base-href /arduino/ --serve-path /arduino/"
     ports:
       - "3000:3000"
     volumes:
@@ -42,7 +42,7 @@ services:
     build: ./ArduinoFrontend/
     command: >
       sh -c "npm install &&
-             npm start"
+             npx ng serve --disableHostCheck --base-href /arduino/ --serve-path /arduino/"
 
     ports:
       - "4200:4200"
@@ -117,7 +117,7 @@ services:
   #     - ./mysql_data:/var/lib/mysql
 
   db:
-    image: postgres
+    image: postgres:13
     volumes:
       - ./postgres_data:/var/lib/postgresql/data/
     env_file:
