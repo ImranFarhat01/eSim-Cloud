@@ -91,11 +91,11 @@ export default function (state = InitialState, action) {
       delete allComponents[action.payload]
       return { ...state, libraries: newLibraries, allLibraries: allLibraries, components: allComponents }
     }
-
+    
     case actions.UPLOAD_LIBRARIES: {
       if (action.payload === 201) {
-        return { ...state, uploadSuccess: true }
-      } else { return { ...state, uploadSuccess: false } }
+        return { ...state, uploadSuccess: true, uploadError: null }
+      } else { return { ...state, uploadSuccess: false, uploadError: action.payload } }
     }
 
     case actions.RESET_UPLOAD_SUCCESS: {
