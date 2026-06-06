@@ -1,5 +1,5 @@
 from django.contrib.auth import authenticate, get_user_model
-from rest_framework import serializers
+from rest_framework import serializers, serializers as drf_serializers
 
 from djoser.conf import settings
 
@@ -43,3 +43,16 @@ class TokenCreateSerializer(serializers.Serializer):
             self.fail("inactive_account")
 
         self.fail("invalid_credentials")
+        
+class UserProfileSerializer(drf_serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'first_name', 'last_name',
+                  'date_joined', 'last_login']
+        read_only_fields = ['id', 'date_joined', 'last_login']
+
+
+class UserProfileUpdateSerializer(drf_serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['username', 'email', 'first_name', 'last_name']

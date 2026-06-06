@@ -95,3 +95,20 @@ class CustomTokenCreateView(utils.ActionViewMixin, generics.GenericAPIView):
         return Response(
             data=data, status=status.HTTP_200_OK
         )
+from authAPI.serializers import UserProfileSerializer, UserProfileUpdateSerializer
+
+
+class UserProfileView(generics.RetrieveUpdateAPIView):
+    """
+    GET: Returns full user profile including date_joined, last_login, name
+    PATCH: Update username, email, first_name, last_name
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return UserProfileUpdateSerializer
+        return UserProfileSerializer
+
+    def get_object(self):
+        return self.request.user
