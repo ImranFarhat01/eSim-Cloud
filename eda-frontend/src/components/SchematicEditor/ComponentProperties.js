@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react'
 import { useSelector, useDispatch } from 'react-redux'
 import { setCompProperties } from '../../redux/actions/index'
+import { getGraph } from './Helper/ComponentDrag'
 import Draggable from 'react-draggable'
 import { List, ListItem, ListItemText, Button, TextField, TextareaAutosize, Paper } from '@material-ui/core'
 
@@ -56,8 +57,27 @@ export default function ComponentProperties () {
     })
   }
 
+  
   const setProps = () => {
     dispatch(setCompProperties(id, val))
+    const graph = getGraph()
+    if (graph) {
+      const model = graph.getModel()
+      const cells = graph.getSelectionCells()
+      if (cells && cells.length > 0) {
+        model.beginUpdate()
+        try {
+          cells.forEach(cell => {
+            if (cell.vertex) {
+              const newLabel = val.VALUE || val.value || cell.value
+              model.setValue(cell, newLabel)
+            }
+          })
+        } finally {
+          model.endUpdate()
+        }
+      }
+    }
   }
 
   return (
