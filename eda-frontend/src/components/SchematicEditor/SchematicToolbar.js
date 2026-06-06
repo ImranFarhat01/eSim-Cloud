@@ -430,6 +430,7 @@ export default function SchematicToolbar ({
 
   // Image Export of Schematic Diagram
   async function exportImage (type) {
+    if (!gridRef.current) { return null }
     const svg = document.querySelector('#divGrid > svg').cloneNode(true)
     svg.removeAttribute('style')
     svg.setAttribute('width', gridRef.current.scrollWidth)
