@@ -427,8 +427,11 @@ export default function SchematicToolbar ({
     window.location.reload()
   }
 
-  // Image Export of Schematic Diagram
+  // Image Export of Schematic Diagram    
   async function exportImage (type) {
+    if (!gridRef.current) {
+      return null
+    }
     const svg = document.querySelector('#divGrid > svg').cloneNode(true)
     svg.removeAttribute('style')
     svg.setAttribute('width', gridRef.current.scrollWidth)
@@ -554,6 +557,7 @@ export default function SchematicToolbar ({
       const title = schSave.title
       const description = schSave.description
       exportImage('PNG').then((res) => {
+        if (res === null) return
         dispatch(
           saveSchematic(title, description, xml, res, false, null, handleSave)
         )
