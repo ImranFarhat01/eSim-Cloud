@@ -1,12 +1,18 @@
 import React, { useState, useEffect } from 'react'
 import { Container, Grid, Button, Paper, Typography, Switch, FormControlLabel } from '@material-ui/core'
+import MuiAlert from '@material-ui/lab/Alert'
 import { makeStyles } from '@material-ui/core/styles'
 import Editor from '../components/Simulator/Editor'
 import textToFile from '../components/Simulator/textToFile'
 import SimulationScreen from '../components/Shared/SimulationScreen'
-import { useDispatch } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 import { setResultGraph, setResultText, setNetlist } from '../redux/actions/index'
 import Notice from '../components/Shared/Notice'
+import { sanitizeNetlistForExport } from '../components/SchematicEditor/Helper/NetlistExporter'
+import ErrorExplainerCard from '../components/Simulator/ErrorExplainerCard'
+import ChatPanel from '../components/AIAssistant/ChatPanel'
+import SimulationHistoryDrawer from '../components/Simulator/SimulationHistoryDrawer'
+import { saveSimulationRun } from '../utils/simulationHistory'
 
 import api from '../utils/Api'
 
@@ -32,25 +38,60 @@ export default function Simulator () {
   const [err, setErr] = useState(false)
   const [status, setStatus] = useState('')
   const stats = { loading: 'loading', error: 'error', success: 'success' }
+  // errorHelp holds the structured error_help object from the backend parser,
+  // or null when no structured help is available (backward-compatibility).
+  const [errorHelp, setErrorHelp] = useState(null)
+
+  const [missingSimCmd, setMissingSimCmd] = useState(false)
+
+  // History drawer state
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyErrorHelp, setHistoryErrorHelp] = useState(null)
+
+  const handleSelectHistoryResult = (item) => {
+    setErrorHelp(null)
+    if (item && item.errorHelp) {
+      setHistoryErrorHelp(item.errorHelp)
+    } else {
+      setHistoryErrorHelp(null)
+    }
+  }
   const [state, setState] = React.useState({
     checkedA: false
 
   })
   const [taskId, setTaskId] = useState(null)
 
+  const reduxNetlist = useSelector(state => state.netlistReducer.netlist)
+
   useEffect(() => {
     document.title = 'Simulator - eSim '
   })
+
+  useEffect(() => {
+    if (reduxNetlist) {
+      setNetlistCode(reduxNetlist)
+    }
+  }, [reduxNetlist])
 
   const handleChange = (event) => {
     setState({ ...state, [event.target.name]: event.target.checked })
   }
 
   const handleSimulationButtonClick = () => {
+    const lowerCode = netlistCode.toLowerCase()
+    if (!lowerCode.includes('.tran') && !lowerCode.includes('.ac') && !lowerCode.includes('.dc ') && !lowerCode.includes('.op')) {
+      setMissingSimCmd(true)
+      return
+    }
     prepareNetlist()
   }
   const onCodeChange = (code) => {
     setNetlistCode(code)
+    const lowerCode = code.toLowerCase()
+    if (lowerCode.includes('.tran') || lowerCode.includes('.ac') || lowerCode.includes('.dc ') || lowerCode.includes('.op')) {
+      setMissingSimCmd(false)
+    }
   }
 
   const [simulateOpen, setSimulateOpen] = React.useState(false)
@@ -75,32 +116,8 @@ export default function Simulator () {
     setSimulateOpen(false)
   }
 
-  const netlistCodeSanitization = (code) => {
-    const codeArray = code.split('\n')
-    let cleanCode = ''
-    let frontPlot = ''
-    for (let line = 0; line < codeArray.length; line++) {
-      if (codeArray[line].includes('plot') && !codeArray[line].includes('setplot')) {
-        frontPlot += codeArray[line].split('plot ')[1] + ' '
-      }
-    }
-    frontPlot = `print ${frontPlot} > data.txt \n`
-    let flag = 0
-    for (let i = 0; i < codeArray.length; i++) {
-      if (codeArray[i].includes('plot') && !codeArray[i].includes('setplot')) {
-        if (!flag) {
-          cleanCode += frontPlot
-          flag = 1
-        }
-      } else {
-        cleanCode += codeArray[i] + '\n'
-      }
-    }
-    return cleanCode
-  }
-
   function prepareNetlist () {
-    const sanatizedText = netlistCodeSanitization(netlistCode)
+    const sanatizedText = sanitizeNetlistForExport(netlistCode)
     dispatch(setNetlist(sanatizedText))
     const file = textToFile(sanatizedText)
     sendNetlist(file)
@@ -155,7 +172,26 @@ export default function Simulator () {
           console.log(res.data.details)
           msg = res.data.details.fail.replace("b'", '')
           isError = true
-          console.log(err)
+          // BUG 3 fix: use optional chaining (?.) at every level so an old
+          // backend response without error_help does not throw a TypeError.
+          // Confirmed path (from views.py CeleryResultView):
+          //   res.data = { state: '...', details: celery_result.info }
+          //   celery_result.info on failure = { fail: '...', error_help: {...} }
+          // → correct path is res.data?.details?.error_help
+          if (res.data?.details?.error_help) {
+            setErrorHelp(res.data.details.error_help)
+          } else {
+            setErrorHelp(null)
+          }
+          // Task 5: save failed run to localStorage history.
+          saveSimulationRun({
+            timestamp: new Date().toISOString(),
+            success: false,
+            simulationType: 'NgSpiceSimulator',
+            result: res.data.details,
+            errorHelp: res.data?.details?.error_help || null,
+            netlist: netlistCode
+          })
         } else {
           const result = res.data.details
           resPending = false
@@ -227,6 +263,17 @@ export default function Simulator () {
           // console.log('no error')
           handleStatus(stats.success)
           handlesimulateOpen()
+          // Clear any previous error help on success.
+          setErrorHelp(null)
+          // Task 5: save successful run to localStorage history.
+          saveSimulationRun({
+            timestamp: new Date().toISOString(),
+            success: true,
+            simulationType: 'NgSpiceSimulator',
+            result: null,
+            errorHelp: null,
+            netlist: netlistCode
+          })
         } else if (resPending === false) {
           handleStatus(stats.error)
           handleErrMsg(msg)
@@ -242,8 +289,28 @@ export default function Simulator () {
       })
   }
 
+  /**
+   * Builds and dispatches the cross-component event that tells ChatPanel to
+   * pre-fill its input with a description of the current error.
+   */
+  const handleAskAI = () => {
+    const message = 'I got this simulation error: ' + errorHelp.summary +
+      (errorHelp.hints && errorHelp.hints.length > 0 ? '. Hints: ' + errorHelp.hints.join(', ') : '')
+    window.dispatchEvent(new CustomEvent('esim-open-chat-with-prompt', {
+      detail: { message }
+    }))
+  }
+
+  const handleHistoryAskAI = () => {
+    const message = 'I got this simulation error: ' + historyErrorHelp.summary +
+      (historyErrorHelp.hints && historyErrorHelp.hints.length > 0 ? '. Hints: ' + historyErrorHelp.hints.join(', ') : '')
+    window.dispatchEvent(new CustomEvent('esim-open-chat-with-prompt', {
+      detail: { message }
+    }))
+  }
+
   return (
-    <Container maxWidth="lg" className={classes.header}>
+    <Container component="main" maxWidth="md" className={classes.header}>
       <SimulationScreen open={simulateOpen} isResult={isResult} close={handleSimulateClose} dark={state} taskId={taskId} />
       <Grid
         container
@@ -252,6 +319,28 @@ export default function Simulator () {
         justify="center"
         alignItems="stretch"
       >
+        {/* ErrorExplainerCard appears above the raw error Notice when
+            the backend has provided structured error_help. */}
+        {errorHelp && (
+          <Grid item xs={12}>
+            <ErrorExplainerCard
+              summary={errorHelp.summary}
+              hints={errorHelp.hints}
+              codes={errorHelp.codes}
+              onAskAI={handleAskAI}
+            />
+          </Grid>
+        )}
+        {historyErrorHelp && (
+          <Grid item xs={12}>
+            <ErrorExplainerCard
+              summary={historyErrorHelp.summary}
+              hints={historyErrorHelp.hints}
+              codes={historyErrorHelp.codes}
+              onAskAI={handleHistoryAskAI}
+            />
+          </Grid>
+        )}
         <Notice status={status} open={err} msg={errMsg} close={handleErrClose}/>
         <Grid item xs={12} >
           <Paper className={classes.paper}>
@@ -277,15 +366,56 @@ export default function Simulator () {
               label="Light Mode"
             />
 
+            {missingSimCmd && (
+              <div style={{ textAlign: 'left', marginBottom: '16px' }}>
+                <MuiAlert severity="warning">
+                  Your netlist has no simulation command. Add one of these before .end:
+                </MuiAlert>
+                <Paper style={{ padding: '8px', backgroundColor: '#2d2d2d', color: '#a6e22e', fontFamily: 'monospace', marginTop: '8px', fontSize: '14px' }}>
+                  .tran 10u 10m 0   &larr; Transient (timestep stoptime start)<br/>
+                  .ac dec 10 1 1Meg  &larr; AC analysis<br/>
+                  .dc V1 0 5 0.1    &larr; DC sweep
+                </Paper>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  style={{ marginTop: '8px', borderColor: '#a6e22e', color: '#a6e22e' }}
+                  onClick={() => {
+                    const newCode = netlistCode + '\n.tran 1u 1m 0\n.control\nrun\nplot all\n.endc\n.end\n'
+                    setNetlistCode(newCode)
+                    setMissingSimCmd(false)
+                  }}
+                >
+                  Quick Add Transient
+                </Button>
+              </div>
+            )}
+
             <Editor code={netlistCode} onCodeChange={onCodeChange} dark={state} />
             <br />
 
             <Button variant="contained" color="primary" size="large" onClick={handleSimulationButtonClick}>
               Simulate
             </Button>
+            <Button
+              variant="outlined"
+              color="secondary"
+              size="large"
+              onClick={() => setHistoryOpen(true)}
+              style={{ marginLeft: '10px' }}
+            >
+              History
+            </Button>
           </Paper>
         </Grid>
       </Grid>
+
+      <SimulationHistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onSelectResult={handleSelectHistoryResult}
+      />
+      <ChatPanel />
     </Container>
   )
 }

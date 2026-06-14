@@ -1,15 +1,18 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import PropTypes from 'prop-types'
-import { List, ListItemText, Tooltip, Popover } from '@material-ui/core'
+import {
+  List, ListItemText, Tooltip, Popover,
+  Button, Snackbar, IconButton
+} from '@material-ui/core'
 import { makeStyles } from '@material-ui/core/styles'
-import api from '../../utils/Api'
-import Button from '@material-ui/core/Button'
-import Snackbar from '@material-ui/core/Snackbar'
 import CloseIcon from '@material-ui/icons/Close'
-import IconButton from '@material-ui/core/IconButton'
+import StarIcon from '@material-ui/icons/Star'
+import StarBorderIcon from '@material-ui/icons/StarBorder'
 
 import './Helper/SchematicEditor.css'
 import { AddComponent } from './Helper/SideBar.js'
+import { prefetchSvg } from './Helper/SvgParser.js'
+import { addFavourite, removeFavourite, isFavourite } from '../../utils/favouritesStorage'
 
 const useStyles = makeStyles((theme) => ({
   popupInfo: {
@@ -17,132 +20,152 @@ const useStyles = makeStyles((theme) => ({
     padding: theme.spacing(1.5),
     border: '1px solid blue',
     borderRadius: '5px'
+  },
+  compWrapper: {
+    position: 'relative',
+    display: 'inline-block'
+  },
+  starBtn: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    padding: 2,
+    zIndex: 2,
+    background: 'rgba(255,255,255,0.75)',
+    borderRadius: '50%',
+    '&:hover': {
+      background: 'rgba(255,255,255,0.95)'
+    }
+  },
+  starIconOn: {
+    fontSize: 14,
+    color: '#f4b400'
+  },
+  starIconOff: {
+    fontSize: 14,
+    color: '#9e9e9e'
   }
 }))
 
-export default function SideComp ({ isFavourite = false, favourite, setFavourite, component }) {
+// ─── localStorage-backed favourites — no auth required ───────────────────────
+export default function SideComp ({ favourite, setFavourite, component }) {
   const classes = useStyles()
-  const imageRef = React.createRef()
+  const imageRef = useRef(null)
 
-  const [openSnackbar, setOpenSnackbar] = React.useState(false)
   const [anchorEl, setAnchorEl] = React.useState(null)
-  const [snackbarMessage, setSnackbarMessage] = React.useState(null)
+  const [snackbar, setSnackbar] = React.useState({ open: false, message: '' })
 
-  const handleClick = (event) => {
-    setAnchorEl(event.currentTarget)
-  }
-  const handleClose = () => {
-    setAnchorEl(null)
+  const showSnackbar = (message) => setSnackbar({ open: true, message })
+  const closeSnackbar = (_, reason) => {
+    if (reason === 'clickaway') return
+    setSnackbar((s) => ({ ...s, open: false }))
   }
 
-  const handleSnackbarClose = (event, reason) => {
-    if (reason === 'clickaway') {
-      return
-    }
-
-    setOpenSnackbar(false)
-  }
+  const handleClick = (event) => setAnchorEl(event.currentTarget)
+  const handleClose = () => setAnchorEl(null)
 
   const open = Boolean(anchorEl)
   const id = open ? 'simple-popover' : undefined
 
   useEffect(() => {
-    // Function call to make components draggable
+    // Pre-fetch SVG data so first drag is instant (no network wait)
+    prefetchSvg(component)
+    // Make component thumbnail draggable onto the mxGraph canvas
     AddComponent(component, imageRef.current)
     // eslint-disable-next-line
   }, [])
 
-  useEffect(() => {
-    if (snackbarMessage !== null) { setOpenSnackbar(true) }
-  }, [snackbarMessage])
+  // Returns true when this component is already in the user's favourites list.
+  // Reads from localStorage via isFavourite() — works without auth.
+  const isStarred = () => {
+    // Prefer the parent's in-memory state (passed as `favourite` prop) when available
+    // so the star updates immediately on toggle without waiting for a localStorage re-read.
+    if (favourite && Array.isArray(favourite)) {
+      return favourite.some((fav) => fav.id === component.id)
+    }
+    return isFavourite(component.id)
+  }
 
-  useEffect(() => {
-    if (openSnackbar === false) { setSnackbarMessage(null) }
-  }, [openSnackbar])
-
-  const addFavourite = (id) => {
-    const token = localStorage.getItem('esim_token')
-    const body = {
-      component: [id]
-    }
-    const config = {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    }
-    if (token) {
-      config.headers.Authorization = `Token ${token}`
-    }
-    api.post('favouritecomponents', body, config).then(resp => {
-      setFavourite(resp.data.component)
-      setSnackbarMessage('Component is added to favourites successfully')
-    }).catch(err => {
-      console.log(err)
-    })
+  // ── localStorage-backed add ──────────────────────────────────────────────
+  const handleAddFavourite = () => {
+    const updated = addFavourite(component)
+    if (setFavourite) setFavourite(updated)
+    showSnackbar('Added to favourites')
     setAnchorEl(null)
   }
 
-  const handleFavourite = (id) => {
-    if (favourite) {
-      var flag = 0
-      for (var i = 0; i < favourite.length; i++) {
-        if (favourite[i].id === id) {
-          flag = 1
-          break
-        }
-      }
-      if (!flag) {
-        addFavourite(id)
-      } else {
-        setSnackbarMessage('This component is already added to favourites')
-        setAnchorEl(null)
-      }
+  // ── localStorage-backed remove ───────────────────────────────────────────
+  const handleRemoveFavourite = () => {
+    const updated = removeFavourite(component.id)
+    if (setFavourite) setFavourite(updated)
+    showSnackbar('Removed from favourites')
+    setAnchorEl(null)
+  }
+
+  // One-click star toggle on thumbnail — bypasses the info popover.
+  // Works for ALL users — no token check required.
+  const handleStarToggle = (e) => {
+    e.stopPropagation()
+    if (isStarred()) {
+      handleRemoveFavourite()
     } else {
-      addFavourite(id)
+      handleAddFavourite()
     }
   }
 
-  const handleRemove = (id) => {
-    const token = localStorage.getItem('esim_token')
-    const config = {
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    }
-    if (token) {
-      config.headers.Authorization = `Token ${token}`
-    }
-    api.delete(`favouritecomponents/${id}`, config).then(resp => {
-      setFavourite(resp.data.component)
-    }).catch(err => {
-      console.log(err)
-    })
-    setAnchorEl(null)
-  }
   return (
     <div>
-      <Tooltip title={component.full_name + ' : ' + component.description} arrow>
-        {/* Display Image thumbnail in left side pane */}
-        <img ref={imageRef} className='compImage' src={'../' + component.svg_path} alt="Logo" aria-describedby={id} onClick={handleClick} />
-      </Tooltip>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+        {/* Wrapper gives the star IconButton an absolute-position anchor */}
+        <div className={classes.compWrapper}>
+          <Tooltip title={component.full_name + ' : ' + component.description} arrow>
+            {/* Display Image thumbnail; also the drag source registered by AddComponent */}
+            <img
+              ref={imageRef}
+              className='compImage'
+              src={'../' + (component.svg_path || '')}
+              alt={component.name || 'component'}
+              aria-describedby={id}
+              onClick={handleClick}
+              onError={(e) => { e.target.style.visibility = 'hidden' }}
+            />
+          </Tooltip>
 
-      {/* Popover to display component information on single click */}
+          {/* Star icon overlay — shown for ALL users, no auth required */}
+          <Tooltip title={isStarred() ? 'Remove from favourites' : 'Add to favourites'} arrow>
+            <IconButton
+              className={classes.starBtn}
+              size="small"
+              onClick={handleStarToggle}
+              aria-label={
+                isStarred()
+                  ? `Remove ${component.name} from favourites`
+                  : `Add ${component.name} to favourites`
+              }
+            >
+              {isStarred()
+                ? <StarIcon className={classes.starIconOn} />
+                : <StarBorderIcon className={classes.starIconOff} />}
+            </IconButton>
+          </Tooltip>
+        </div>
+
+        <span style={{ fontSize: '11px', textAlign: 'center', marginTop: '4px', color: '#555', wordBreak: 'break-word', lineHeight: '1.2' }}>
+          {component.name}
+        </span>
+      </div>
+
+      {/* Popover — shows component details on thumbnail click */}
       <Popover
         id={id}
         open={open}
         className={classes.popup}
         anchorEl={anchorEl}
         onClose={handleClose}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'center'
-        }}
-        transformOrigin={{
-          vertical: 'top',
-          horizontal: 'center'
-        }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <List component="div" className={classes.popupInfo} disablePadding dense >
+        <List component="div" className={classes.popupInfo} disablePadding dense>
           <ListItemText>
             <b>Component Name:</b> {component.name}
           </ListItemText>
@@ -152,47 +175,51 @@ export default function SideComp ({ isFavourite = false, favourite, setFavourite
               <b>Description:</b> {component.description}
             </ListItemText>
           }
-          {
-            component.keyword !== '' &&
+
+          {component.keyword !== '' &&
             <ListItemText>
               <b>Keywords:</b> {component.keyword}
             </ListItemText>
-
           }
 
-          {
-            component.data_link !== '' &&
+          {component.data_link !== '' &&
             <ListItemText>
-              <b>Datasheet:</b> <a href={component.data_link} rel="noopener noreferrer" target='_blank' >{component.data_link}</a>
+              <b>Datasheet:</b>{' '}
+              <a href={component.data_link} rel="noopener noreferrer" target="_blank">
+                {component.data_link}
+              </a>
             </ListItemText>
           }
 
-          {!isFavourite && localStorage.getItem('esim_token') &&
+          {/* Add / Remove from Favourites buttons — no auth required */}
+          {!isStarred() &&
             <ListItemText>
-              <Button onClick={() => handleFavourite(component.id)}>Add to Favourites</Button>
+              <Button onClick={handleAddFavourite}>
+                Add to Favourites
+              </Button>
             </ListItemText>
           }
 
-          {isFavourite && localStorage.getItem('esim_token') &&
+          {isStarred() &&
             <ListItemText>
-              <Button onClick={() => handleRemove(component.id)}>Remove from Favourites</Button>
+              <Button onClick={handleRemoveFavourite}>
+                Remove from Favourites
+              </Button>
             </ListItemText>
           }
         </List>
       </Popover>
+
       <Snackbar
         style={{ zIndex: 100 }}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'left'
-        }}
-        open={openSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        open={snackbar.open}
         autoHideDuration={2000}
-        onClose={handleSnackbarClose}
-        message={snackbarMessage}
+        onClose={closeSnackbar}
+        message={snackbar.message}
         action={
           <>
-            <IconButton size="small" aria-label="close" color="inherit" onClick={handleSnackbarClose}>
+            <IconButton size="small" aria-label="close" color="inherit" onClick={closeSnackbar}>
               <CloseIcon fontSize="small" />
             </IconButton>
           </>
@@ -204,7 +231,6 @@ export default function SideComp ({ isFavourite = false, favourite, setFavourite
 
 SideComp.propTypes = {
   component: PropTypes.object.isRequired,
-  isFavourite: PropTypes.bool,
   setFavourite: PropTypes.func,
   favourite: PropTypes.array
 }

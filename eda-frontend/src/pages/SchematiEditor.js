@@ -1,6 +1,7 @@
+
 // Main Layout for Schemaic Editor page.
 /* eslint-disable react/prop-types */
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { CssBaseline } from '@material-ui/core'
 import { makeStyles } from '@material-ui/core/styles'
 
@@ -11,13 +12,18 @@ import LayoutMain from '../components/Shared/LayoutMain'
 import SchematicToolbar from '../components/SchematicEditor/SchematicToolbar'
 import RightSidebar from '../components/SchematicEditor/RightSidebar'
 import PropertiesSidebar from '../components/SchematicEditor/PropertiesSidebar'
+import NetlistPreviewPanel from '../components/SchematicEditor/NetlistPreviewPanel'
+import { ClearGrid } from '../components/SchematicEditor/Helper/ToolbarTools'
 import LoadGrid from '../components/SchematicEditor/Helper/ComponentDrag.js'
 import ComponentProperties from '../components/SchematicEditor/ComponentProperties'
+import SimulationProperties from '../components/SchematicEditor/SimulationProperties'
+import SimulationScreen from '../components/Shared/SimulationScreen'
+import TemplateWizard from '../components/SchematicEditor/TemplateWizard'
 import '../components/SchematicEditor/Helper/SchematicEditor.css'
 import { fetchSchematic, fetchGallerySchematic } from '../redux/actions/index'
-import { useDispatch } from 'react-redux'
+import { useDispatch, useSelector } from 'react-redux'
 
-const useStyles = makeStyles((theme) => ({
+const useStyles = makeStyles(() => ({
   root: {
     display: 'flex',
     minHeight: '100vh'
@@ -32,20 +38,59 @@ export default function SchematiEditor (props) {
   const compRef = React.createRef()
   const gridRef = React.createRef()
   const outlineRef = React.createRef()
+  const minimapRef = React.createRef()
   const dispatch = useDispatch()
+  const isSimulate = useSelector(state => state.schematicEditorReducer.isSimulate)
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const [ltiSimResult, setLtiSimResult] = React.useState(false)
+  const [simulateOpen, setSimulateOpen] = React.useState(false)
+  const [isResult, setIsResult] = React.useState(false)
+  const [taskId, setTaskId] = React.useState(null)
+  const [simType, setSimType] = React.useState('NgSpiceSimulator')
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [clearCanvasFirst, setClearCanvasFirst] = useState(false)
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen)
   }
+
+  const handleWizardClose = () => {
+    setWizardOpen(false)
+    localStorage.setItem('esim_template_seen', 'true')
+  }
+
+  const handleTemplateSelect = (template) => {
+    console.log('[TemplateWizard] Template selected:', template.title)
+    if (clearCanvasFirst) {
+      ClearGrid()
+    }
+    handleWizardClose()
+  }
+
+  const handleNewFromTemplate = () => {
+    setClearCanvasFirst(true)
+    setWizardOpen(true)
+  }
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search)
+    const hasId = query.has('id')
+    const hasVersion = query.has('version')
+    const hasBranch = query.has('branch')
+
+    if (!hasId && !hasVersion && !hasBranch && localStorage.getItem('esim_template_seen') !== 'true') {
+      setClearCanvasFirst(false)
+      setWizardOpen(true)
+    }
+  }, [])
 
   useEffect(() => {
     document.title = 'Schematic Editor - eSim '
     const container = gridRef.current
     const sidebar = compRef.current
     const outline = outlineRef.current
-    LoadGrid(container, sidebar, outline)
+    const minimap = minimapRef.current
+    LoadGrid(container, sidebar, outline, minimap)
 
     if (props.location.search !== '') {
       const query = new URLSearchParams(props.location.search)
@@ -78,25 +123,72 @@ export default function SchematiEditor (props) {
             ltiSimResult={ltiSimResult}
             setLtiSimResult={setLtiSimResult}
             mobileClose={handleDrawerToggle}
+            onNewFromTemplate={handleNewFromTemplate}
           />
         }
         sidebar={<ComponentSidebar compRef={compRef} ltiSimResult={ltiSimResult}
           setLtiSimResult={setLtiSimResult}/>}
       />
 
-      {/* Grid for drawing and designing circuits */}
       <LayoutMain>
         <div className={classes.toolbar} />
-        <center>
-          <div className="grid-container A4-L" ref={gridRef} id="divGrid" />
-        </center>
+        <div style={{ display: 'flex', height: 'calc(100vh - 80px)' }}>
+          <div style={{ flex: isSimulate ? 1 : 'none', width: isSimulate ? '50%' : '100%', borderRight: isSimulate ? '2px solid #ccc' : 'none', overflow: 'hidden', height: '100%', position: 'relative' }}>
+            <div className="grid-container" ref={gridRef} id="divGrid" style={{ width: '100%', height: '100%', margin: 0, border: 'none', borderRadius: 0, boxShadow: 'none' }} />
+            {/* Opaque Floating Dynamic Minimap */}
+            <div
+              className="minimap-container"
+              ref={minimapRef}
+              id="minimapContainer"
+              style={{
+                position: 'absolute',
+                top: '15px',
+                left: '15px',
+                width: '200px',
+                height: '150px',
+                backgroundColor: '#ffffff', // Opaque
+                border: '1px solid #ccc',
+                borderRadius: '5px',
+                pointerEvents: 'none',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+                zIndex: 1000
+              }}
+            />
+          </div>
+          {isSimulate && (
+            <div style={{ flex: 1, width: '50%', overflowY: 'auto' }}>
+              <SimulationScreen open={simulateOpen} isResult={isResult} close={() => setSimulateOpen(false)} taskId={taskId} simType={simType} />
+            </div>
+          )}
+        </div>
       </LayoutMain>
 
-      {/* Schematic editor Right side pane */}
       <RightSidebar mobileOpen={mobileOpen} mobileClose={handleDrawerToggle}>
-        <PropertiesSidebar gridRef={gridRef} outlineRef={outlineRef} />
+        {isSimulate ? (
+          <SimulationProperties
+            setSimulateOpen={setSimulateOpen}
+            setIsResult={setIsResult}
+            setTaskId={setTaskId}
+            setSimType={setSimType}
+            ltiSimResult={ltiSimResult}
+            setLtiSimResult={setLtiSimResult}
+          />
+        ) : (
+          <>
+            <PropertiesSidebar gridRef={gridRef} outlineRef={outlineRef} />
+            <NetlistPreviewPanel gridRef={gridRef} />
+          </>
+        )}
       </RightSidebar>
       <ComponentProperties/>
+      {wizardOpen && (
+        <TemplateWizard
+          open={wizardOpen}
+          onClose={handleWizardClose}
+          onTemplateSelect={handleTemplateSelect}
+          clearCanvasFirst={clearCanvasFirst}
+        />
+      )}
     </div>
   )
 }
