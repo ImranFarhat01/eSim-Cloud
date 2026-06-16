@@ -862,7 +862,7 @@ export function OpenSchDialog (props) {
                                       <Button
                                         size="small"
                                         color="primary"
-                                        onClick={() => { dispatch(fetchSchematic(sch.save_id)) }}
+                                        onClick={() => { dispatch(fetchSchematic(sch.save_id, sch.version, sch.branch)) }}
                                         variant={schSave.details.save_id === undefined ? 'outlined' : schSave.details.save_id !== sch.save_id ? 'outlined' : 'contained'}
                                       >
                                       Launch
