@@ -261,6 +261,40 @@
   Any non-201 response shows the same generic error regardless of
   actual error reason (auth failure, wrong format, server error etc.)
 
+#### Bug 14 -- Home/Dashboard/Gallery/Simulator save dialog uses wrong URL format
+**Feature:** Save-and-navigate dialog shown when leaving editor via Dashboard, Gallery, or Simulator nav links
+**Expected:** After saving, browser navigates to the selected destination
+**Actual:** Navigation silently fails, URL resolves to a broken nested path
+**File:** eda-frontend/src/components/SchematicEditor/ToolbarExtension.js lines 500, 502, 587, 589
+**Root Cause:** homeURL built as:
+  `${window.location.protocol}\\\\${window.location.host}/...`
+  Browsers do not treat backslashes as a protocol separator, so
+  window.open()/window.location navigation with this string fails
+  silently instead of navigating to the intended page.
+
+#### Bug 15 -- Save dialog does not navigate away when save is a duplicate
+**Feature:** Save-and-navigate dialog shown when leaving editor via Dashboard, Gallery, or Simulator nav links
+**Expected:** After a successful save, dialog closes and navigates to destination
+**Actual:** If saved content is unchanged since the last save (backend returns duplicate: true), dialog stays open indefinitely with no feedback
+**File:** eda-frontend/src/redux/actions/saveSchematicActions.js line 79
+**Root Cause:** Success handler only calls the navigation callback when
+  the response is not a duplicate:
+  if (!res.data.duplicate) { setVersions(res.data.version, false, null) }
+  This was likely intended to skip creating a redundant version record,
+  but it also skips navigation entirely, leaving the user stuck with no
+  indication that the save already succeeded.
+
+#### Bug 16 -- Missing migration for StateSave.pinned field
+**Feature:** Dashboard schematics list (/api/save, /api/save/list)
+**Expected:** Dashboard loads saved circuits list
+**Actual:** 500 Internal Server Error on a fresh database/migration run
+**File:** esim-cloud-backend/saveAPI/models.py, esim-cloud-backend/saveAPI/migrations/
+**Root Cause:** pinned field was added to the StateSave model
+  (pinned = models.BooleanField(default=False, null=False))
+  but no corresponding migration file was generated/committed.
+  Any fresh `migrate` run leaves the database column missing, causing
+  psycopg2.errors.UndefinedColumn on every query touching StateSave.
+
 ---
 
 ### Improvements Identified
