@@ -497,9 +497,9 @@ export function HomeDialog ({ open, gridRef, routeVal, onClose, schSave }) {
   }, [dispatch])
   var homeURL = ''
   if (routeVal === 'home') {
-    homeURL = `${window.location.protocol}\\\\${window.location.host}/`
+    homeURL = `${window.location.protocol}//${window.location.host}/`
   } else {
-    homeURL = `${window.location.protocol}\\\\${window.location.host}/eda/#/${routeVal}`
+    homeURL = `${window.location.protocol}//${window.location.host}/eda/#/${routeVal}`
   }
 
   console.log(homeURL)
@@ -584,9 +584,9 @@ export function SchematicNameDialog ({ open, gridRef, routeVal, onClose, schSave
   var homeURL = ''
   console.log(routeVal)
   if (routeVal === 'home') {
-    homeURL = `${window.location.protocol}\\\\${window.location.host}/`
+    homeURL = `${window.location.protocol}//${window.location.host}/`
   } else {
-    homeURL = `${window.location.protocol}\\\\${window.location.host}/eda/#/${routeVal}`
+    homeURL = `${window.location.protocol}//${window.location.host}/eda/#/${routeVal}`
   }
 
   console.log(homeURL)
