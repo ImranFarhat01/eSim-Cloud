@@ -259,10 +259,11 @@ export default function LTIConfig () {
           configURL: '',
           configExists: false,
           consumerError: '',
-          score: '',
+          score: null,
           initialSchematic: '',
           modelSchematic: modelSchematic,
           testCase: null,
+          scored: true,
           id: ''
         })
         setHistoryId('')
@@ -394,7 +395,7 @@ export default function LTIConfig () {
             {ltiDetails.consumerError && <h3>{ltiDetails.consumerError}</h3>}
             <TextField id="standard-basic" label="Consumer Key" defaultValue={consumerKey} onChange={handleConsumerKey} value={consumerKey} />
             <TextField style={{ marginLeft: '1%' }} id="standard-basic" label="Secret Key" defaultValue={secretKey} onChange={handleSecretKey} value={secretKey} />
-            <TextField style={{ marginLeft: '1%' }} id="standard-basic" label="Score" defaultValue={score} onChange={handleScore} value={score} disabled={!ltiDetails.scored} />
+            <TextField style={{ marginLeft: '1%' }} id="standard-basic" label="Score" defaultValue={score ?? ''} onChange={handleScore} value={score ?? ''} disabled={!ltiDetails.scored} />
             <FormControl style={{ marginTop: '1%' }} className={classes.formControl}>
               <InputLabel htmlFor="outlined-age-native-simple">Schematic</InputLabel>
               <Select
