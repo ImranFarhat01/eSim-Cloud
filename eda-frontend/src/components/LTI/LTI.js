@@ -203,6 +203,14 @@ export default function LTIConfig () {
 
   // eslint-disable-next-line
   const handleLTIGenerate = () => {
+    if (!ltiDetails.consumerKey || !ltiDetails.secretKey) {
+      setLTIDetails({ ...ltiDetails, consumerError: 'Consumer Key and Secret Key are required.' })
+      return
+    }
+    if (!ltiDetails.modelSchematic || !ltiDetails.modelSchematic.id) {
+      setLTIDetails({ ...ltiDetails, consumerError: 'Please select a schematic before generating LTI URL.' })
+      return
+    }
     var score = ''
     if (!ltiDetails.scored) {
       score = null
