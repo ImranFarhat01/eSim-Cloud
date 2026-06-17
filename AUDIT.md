@@ -295,6 +295,19 @@
   Any fresh `migrate` run leaves the database column missing, causing
   psycopg2.errors.UndefinedColumn on every query touching StateSave.
 
+#### Bug 17 -- Deleting an LTI app resets scored field, breaking recreation
+**Feature:** Delete an existing LTI app and create a new one for the same circuit
+**Expected:** After deleting an LTI app, creating a new one for the same circuit succeeds
+**Actual:** Creation fails with a 400 error ("scored: This field is required") with no visible feedback to the user beyond a generic console error
+**File:** eda-frontend/src/components/LTI/LTI.js, handleDeleteLTIApp function
+**Root Cause:** handleDeleteLTIApp rebuilds the ltiDetails state from
+  scratch after a successful delete, but the rebuilt object omits the
+  scored field entirely (unlike the initial component state, which
+  sets scored: true by default). Once scored becomes undefined, it
+  stays undefined unless the user manually toggles the checkbox,
+  and is silently dropped from the JSON request body on the next
+  create attempt, which the backend then rejects as a required field.
+
 ---
 
 ### Improvements Identified
