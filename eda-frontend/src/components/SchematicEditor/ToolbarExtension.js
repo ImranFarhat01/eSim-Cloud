@@ -1040,6 +1040,7 @@ export function SelectLibrariesModal ({ open, close }) {
   const allLibraries = useSelector(state => state.schematicEditorReducer.allLibraries)
   const libraries = useSelector(state => state.schematicEditorReducer.libraries)
   const uploadSuccess = useSelector(state => state.schematicEditorReducer.uploadSuccess)
+  const uploadError = useSelector(state => state.schematicEditorReducer.uploadError)
   const auth = useSelector(state => state.authReducer)
   const dispatch = useDispatch()
   const classes = useStyles()
@@ -1061,11 +1062,21 @@ export function SelectLibrariesModal ({ open, close }) {
       dispatch(fetchAllLibraries())
     }
     if (uploadSuccess === false) {
-      setMessage('An Error Occured')
+      if (uploadError === 400) {
+        setMessage('Upload Failed: Invalid file format. Please upload valid .lib and .dcm files.')
+      } else if (uploadError === 401 || uploadError === 403) {
+        setMessage('Upload Failed: You are not authorized to upload libraries.')
+      } else if (uploadError === 413) {
+        setMessage('Upload Failed: File size too large.')
+      } else if (uploadError === 500) {
+        setMessage('Upload Failed: Server error. Please try again.')
+      } else {
+        setMessage('Upload Failed: An unexpected error occurred.')
+      }
       setsnacOpen(true)
       dispatch(resetUploadSuccess())
     }
-  }, [dispatch, uploadSuccess])
+  }, [dispatch, uploadSuccess, uploadError])
 
   useEffect(() => {
     const updateActive = () => {
