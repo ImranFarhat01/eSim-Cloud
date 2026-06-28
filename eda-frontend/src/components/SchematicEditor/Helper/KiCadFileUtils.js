@@ -373,6 +373,315 @@ const reduceWires = (wires) => {
   return wires
 }
 
+
+
+
+// KiCad Simulation_SPICE to eSim component name mapping
+const KICAD_TO_ESIM_MAP = {
+  // Passives -- Device:R/C/L and eSim_Devices:resistor/capacitor/inductor both map here
+  r: { library: 'pspice', componentName: 'R' },
+  c: { library: 'pspice', componentName: 'CAP' },
+  l: { library: 'pspice', componentName: 'INDUCTOR' },
+  resistor: { library: 'pspice', componentName: 'R' },
+  capacitor: { library: 'pspice', componentName: 'CAP' },
+  inductor: { library: 'pspice', componentName: 'INDUCTOR' },
+  // Sources (standard KiCad Simulation_SPICE lib)
+  vsin: { library: 'eSim_Sources', componentName: 'sine' },
+  vsin_pspice: { library: 'eSim_Sources', componentName: 'sine' },
+  vdc: { library: 'eSim_Sources', componentName: 'dc' },
+  vdc_pspice: { library: 'eSim_Sources', componentName: 'dc' },
+  vpulse: { library: 'eSim_Sources', componentName: 'pulse' },
+  vpulse_pspice: { library: 'eSim_Sources', componentName: 'pulse' },
+  vexp: { library: 'eSim_Sources', componentName: 'exp' },
+  vexp_pspice: { library: 'eSim_Sources', componentName: 'exp' },
+  vpwl: { library: 'eSim_Sources', componentName: 'pwl' },
+  vpwl_pspice: { library: 'eSim_Sources', componentName: 'pwl' },
+  // eSim-created circuit sources (source:VDC_PSPICE etc)
+  vdc_pspice: { library: 'eSim_Sources', componentName: 'dc' },
+  vsin_pspice: { library: 'eSim_Sources', componentName: 'sine' },
+  isin: { library: 'eSim_Sources', componentName: 'sine' },
+  idc: { library: 'eSim_Sources', componentName: 'dc' },
+  vsource: { library: 'pspice', componentName: 'VSOURCE' },
+  isource: { library: 'pspice', componentName: 'ISOURCE' },
+  v: { library: 'eSim_Sources', componentName: 'dc' },
+  // Power
+  gnd: { library: 'power', componentName: 'GND' },
+  pwr_flag: { library: 'power', componentName: 'PWR_FLAG' }
+}
+
+// Parse lib_symbols section to extract pin positions per symbol
+const parseLibSymbols = (text) => {
+  const pinDefs = {}
+  // Find lib_symbols block
+  const libStart = text.indexOf('(lib_symbols')
+  if (libStart === -1) return pinDefs
+  let depth = 0, libEnd = libStart
+  for (let i = libStart; i < text.length; i++) {
+    if (text[i] === '(') depth++
+    else if (text[i] === ')') { depth--; if (depth === 0) { libEnd = i + 1; break } }
+  }
+  const libText = text.slice(libStart, libEnd)
+  // Extract each top-level symbol block
+  const symRegex = /\(symbol\s+"([^"]+)"([\s\S]*?)(?=\n\s*\(symbol\s+"|\n\s*\)\s*$)/g
+  let m
+  while ((m = symRegex.exec(libText)) !== null) {
+    const name = m[1]
+    const body = m[2]
+    const pins = []
+    const pinRegex = /\(pin\s+\w+\s+\w+\s+\(at\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\)/g
+    let pm
+    while ((pm = pinRegex.exec(body)) !== null) {
+      pins.push({ x: parseFloat(pm[1]), y: parseFloat(pm[2]), angle: parseFloat(pm[3]) })
+    }
+    if (pins.length > 0) pinDefs[name] = pins
+  }
+  return pinDefs
+}
+
+// Rotate a point around origin by angle in degrees (KiCad uses counterclockwise)
+const rotatePoint = (x, y, angleDeg) => {
+  if (angleDeg === 0) return { x, y }
+  const a = angleDeg * Math.PI / 180
+  return {
+    x: x * Math.cos(a) - y * Math.sin(a),
+    y: x * Math.sin(a) + y * Math.cos(a)
+  }
+}
+
+
+// Reads KiCad 6+ .kicad_sch S-expression format
+const readKicadSchNew = (text) => {
+  const instructions = {
+    components: [],
+    wires: [],
+    connections: []
+  }
+
+  // Parse lib_symbols for pin definitions
+  const pinDefs = parseLibSymbols(text)
+
+  // Parse component instances
+  const symbolRegex = /\(symbol\s+\(lib_id\s+"([^"]+)"\)\s+\(at\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\)/g
+  let match
+  while ((match = symbolRegex.exec(text)) !== null) {
+    const libId = match[1]
+    const sx = parseFloat(match[2])
+    const sy = parseFloat(match[3])
+    const rotation = parseFloat(match[4])
+    const parts = libId.split(':')
+    const library = parts[0] ? parts[0].toLowerCase() : ''
+    const componentName = parts[1] ? parts[1].toLowerCase() : libId.toLowerCase()
+
+    // Find matching pin defs (lib_symbols uses name like "R_1_1", "C_1_1")
+    const shortName = parts[1] || libId
+    let matchedPins = []
+    for (const [defName, pins] of Object.entries(pinDefs)) {
+      if (defName.toLowerCase().startsWith(shortName.toLowerCase() + '_')) {
+        matchedPins = matchedPins.concat(pins)
+      }
+    }
+
+    // Compute absolute pin positions in schematic mm coords
+    const absPins = matchedPins.map(pin => {
+      const rotated = rotatePoint(pin.x, pin.y, -rotation)
+      return { x: sx + rotated.x, y: sy + rotated.y }
+    })
+
+    // Apply eSim mapping if needed
+    const mapped = KICAD_TO_ESIM_MAP[componentName.toLowerCase()]
+    instructions.components.push({
+      library: mapped ? mapped.library : library,
+      componentName: mapped ? mapped.componentName : componentName,
+      x: sx * 20,
+      y: sy * 20,
+      rotation: (90 - rotation + 360) % 360,  // KiCad default=horizontal, eSim default=vertical
+      mirrorX: false,
+      mirrorY: false,
+      absPins  // absolute schematic coords of pins (mm)
+    })
+  }
+
+  // Parse wires
+  const wireRegex = /\(wire[\s\S]*?\(pts[\s\S]*?\(xy\s+([\d.-]+)\s+([\d.-]+)\)\s*\(xy\s+([\d.-]+)\s+([\d.-]+)\)[\s\S]*?\)/g
+  while ((match = wireRegex.exec(text)) !== null) {
+    instructions.wires.push({
+      startx: parseFloat(match[1]),
+      starty: parseFloat(match[2]),
+      endx: parseFloat(match[3]),
+      endy: parseFloat(match[4])
+    })
+  }
+
+  // Parse junctions
+  const junctionRegex = /\(junction\s+\(at\s+([\d.-]+)\s+([\d.-]+)\)/g
+  while ((match = junctionRegex.exec(text)) !== null) {
+    instructions.connections.push({
+      x: parseFloat(match[1]),
+      y: parseFloat(match[2])
+    })
+  }
+
+  instructions.wireSegments = [...instructions.wires]
+  instructions.wires = reduceWires([...instructions.wires.map(w => ({
+    startx: w.startx * 20, starty: w.starty * 20,
+    endx: w.endx * 20, endy: w.endy * 20
+  }))])
+
+  // Keep original mm coords on wires for pin matching
+  instructions.wiresRaw = instructions.wireSegments
+
+  return instructions
+}
+
+
+const loadComponentsNew = async (components, wires, connections, rawWires) => {
+  const token = store.getState().authReducer.token
+  var config = { headers: { 'Content-Type': 'application/json' } }
+  if (token) { config.headers.Authorization = `Token ${token}` }
+
+  var parent = graph.getDefaultParent()
+  var model = graph.getModel()
+
+  const insertComponent = async (comp, compData) => {
+    model.beginUpdate()
+    try {
+      var compCell = await getSvgMetadata(graph, parent, null, null, comp.x,
+        comp.y, compData, comp.rotation, true)
+      graph.refresh()
+    } catch (e) { console.log(e) }
+    model.endUpdate()
+    return compCell
+  }
+
+  const findApprComp = (compDataList, key) => {
+    for (let i = 0; i < compDataList.length; i++) {
+      if (compDataList[i].name.toLowerCase() === key.toLowerCase()) {
+        return compDataList[i]
+      }
+    }
+    return compDataList[0]
+  }
+
+  for (let i = 0; i < components.length; i++) {
+    var url
+    if (components[i].componentName && components[i].library) {
+      url = `components/?component_library__library_name__icontains=${components[i].library}&name__icontains=${components[i].componentName}`
+    } else if (!components[i].library) {
+      url = `components/?name__icontains=${components[i].componentName}`
+    }
+    var compCell = await api.get(url, config)
+      .then((res) => {
+        if (res.data && res.data.length > 0) {
+          const compData = findApprComp(res.data, components[i].componentName)
+          return insertComponent(components[i], compData)
+        } else return null
+      })
+    components[i].mxCell = compCell
+  }
+  joinComponentsNew(components, rawWires || [], connections)
+}
+
+const joinComponentsNew = (components, wiresRaw, connections) => {
+  var model = graph.getModel()
+  const EPS = 0.1 // mm tolerance for pin-to-wire matching
+
+  const ptClose = (ax, ay, bx, by) => Math.abs(ax - bx) < EPS && Math.abs(ay - by) < EPS
+
+  // Union-Find for building wire nets
+  const ufParent = wiresRaw.map((_, i) => i)
+  const find = (i) => { while (ufParent[i] !== i) { ufParent[i] = ufParent[ufParent[i]]; i = ufParent[i] } return i }
+  const union = (a, b) => { ufParent[find(a)] = find(b) }
+
+  // Group wires that share endpoints
+  for (let i = 0; i < wiresRaw.length; i++) {
+    for (let j = i + 1; j < wiresRaw.length; j++) {
+      const wi = wiresRaw[i], wj = wiresRaw[j]
+      if (ptClose(wi.endx, wi.endy, wj.startx, wj.starty) ||
+          ptClose(wi.startx, wi.starty, wj.endx, wj.endy) ||
+          ptClose(wi.startx, wi.starty, wj.startx, wj.starty) ||
+          ptClose(wi.endx, wi.endy, wj.endx, wj.endy)) {
+        union(i, j)
+      }
+    }
+    // Union via junctions
+    for (const conn of connections) {
+      if (ptClose(wiresRaw[i].startx, wiresRaw[i].starty, conn.x, conn.y) ||
+          ptClose(wiresRaw[i].endx, wiresRaw[i].endy, conn.x, conn.y)) {
+        for (let j = 0; j < wiresRaw.length; j++) {
+          if (j !== i && (ptClose(wiresRaw[j].startx, wiresRaw[j].starty, conn.x, conn.y) ||
+                          ptClose(wiresRaw[j].endx, wiresRaw[j].endy, conn.x, conn.y))) {
+            union(i, j)
+          }
+        }
+      }
+    }
+  }
+
+  // Build per-component pin->terminal map using pin index order
+  // absPins[i] corresponds to the i-th connectable child of the mxCell
+  const componentCells = []
+  components.forEach(comp => {
+    if (!comp.mxCell) return
+    const cell = comp.mxCell
+    const connectableChildren = []
+    for (let i = 0; i < cell.getChildCount(); i++) {
+      const child = cell.getChildAt(i)
+      if (child.connectable) connectableChildren.push(child)
+    }
+    const pins = comp.absPins || []
+    const pinMap = [] // { absPin, terminal }
+    for (let i = 0; i < pins.length; i++) {
+      if (connectableChildren[i]) {
+        pinMap.push({ absPin: pins[i], terminal: connectableChildren[i] })
+      }
+    }
+    componentCells.push({ cell, pinMap })
+  })
+
+  // Build net -> terminals mapping
+  const netTerminals = new Map()
+
+  for (let wi = 0; wi < wiresRaw.length; wi++) {
+    const netId = find(wi)
+    if (!netTerminals.has(netId)) netTerminals.set(netId, new Set())
+    const net = netTerminals.get(netId)
+
+    const endpoints = [
+      { x: wiresRaw[wi].startx, y: wiresRaw[wi].starty },
+      { x: wiresRaw[wi].endx, y: wiresRaw[wi].endy }
+    ]
+
+    for (const ep of endpoints) {
+      for (const compEntry of componentCells) {
+        for (const pm of compEntry.pinMap) {
+          if (ptClose(ep.x, ep.y, pm.absPin.x, pm.absPin.y)) {
+            net.add(pm.terminal)
+          }
+        }
+      }
+    }
+  }
+
+  // Draw edges
+  model.beginUpdate()
+  for (const [, terminals] of netTerminals) {
+    const arr = Array.from(terminals)
+    if (arr.length >= 2) {
+      for (let i = 1; i < arr.length; i++) {
+        graph.insertEdge(defaultParent, null, null, arr[0], arr[i])
+      }
+    }
+  }
+  model.endUpdate()
+}
+
+export function importKicadSchNew (fileContents) {
+  const rawInstr = readKicadSchNew(fileContents)
+
+
+  loadComponentsNew([...rawInstr.components], [...rawInstr.wires], [...rawInstr.connections], [...rawInstr.wiresRaw])
+}
+
 export function importSCHFile (fileContents) {
   const rawInstr = readKicadSchematic(fileContents)
   // console.log(rawInstr)

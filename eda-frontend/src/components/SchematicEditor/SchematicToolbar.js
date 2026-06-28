@@ -75,7 +75,7 @@ import {
 } from '../../redux/actions/index'
 import CreateProject from '../Project/CreateProject'
 import api from '../../utils/Api'
-import { importSCHFile } from './Helper/KiCadFileUtils'
+import { importSCHFile, importKicadSchNew } from './Helper/KiCadFileUtils'
 import SubmitResults from '../LTI/SubmitResults'
 
 // Req for Development
@@ -638,12 +638,17 @@ export default function SchematicToolbar ({
   const handleKicadFileUpload = () => {
     const fileSelector = document.createElement('input')
     fileSelector.setAttribute('type', 'file')
-    fileSelector.setAttribute('accept', '.sch')
+    fileSelector.setAttribute('accept', '.sch,.kicad_sch')
     fileSelector.click()
     fileSelector.addEventListener('change', function (event) {
       var reader = new FileReader()
       var filename = event.target.files[0].name
-      if (filename.slice(filename.length - 3) === 'sch') {
+      if (filename.endsWith('.kicad_sch')) {
+        reader.onload = async (e) => {
+          importKicadSchNew(e.target.result)
+        }
+        reader.readAsText(event.target.files[0])
+      } else if (filename.slice(filename.length - 3) === 'sch') {
         reader.onload = async (e) => {
           importSCHFile(e.target.result)
         }
