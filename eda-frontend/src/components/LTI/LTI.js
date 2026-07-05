@@ -72,6 +72,7 @@ export default function LTIConfig () {
   })
 
   const { secretKey, consumerKey, configURL, configExists, score, modelSchematic } = ltiDetails
+  const [scoreError, setScoreError] = React.useState('')
   const [schematic, setSchematic] = React.useState('')
   const [history, setHistory] = React.useState([])
   const [historyId, setHistoryId] = React.useState('')
@@ -272,11 +273,23 @@ export default function LTIConfig () {
   }
 
   const handleScore = (e) => {
-    if (e.target.value > 1 || e.target.value < 0) {
-      // To-DO: Show error message
-    } else {
-      setLTIDetails({ ...ltiDetails, score: e.target.value })
+    const value = e.target.value
+
+    if (value === '') {
+      setScoreError('')
+      setLTIDetails({ ...ltiDetails, score: value })
+      return
     }
+
+    const numValue = Number(value)
+
+    if (isNaN(numValue) || numValue > 1 || numValue < 0) {
+      setScoreError('Score must be a number between 0 and 1')
+      return
+    }
+
+    setScoreError('')
+    setLTIDetails({ ...ltiDetails, score: value })
   }
 
   const handleCheckChange = (e) => {
@@ -386,7 +399,7 @@ export default function LTIConfig () {
             {ltiDetails.consumerError && <h3>{ltiDetails.consumerError}</h3>}
             <TextField id="standard-basic" label="Consumer Key" defaultValue={consumerKey} onChange={handleConsumerKey} value={consumerKey} />
             <TextField style={{ marginLeft: '1%' }} id="standard-basic" label="Secret Key" defaultValue={secretKey} onChange={handleSecretKey} value={secretKey} />
-            <TextField style={{ marginLeft: '1%' }} id="standard-basic" label="Score" defaultValue={score} onChange={handleScore} value={score} disabled={!ltiDetails.scored} />
+            <TextField style={{ marginLeft: '1%' }} id="standard-basic" label="Score" defaultValue={score} onChange={handleScore} value={score} disabled={!ltiDetails.scored} error={!!scoreError} helperText={scoreError} />
             <FormControl style={{ marginTop: '1%' }} className={classes.formControl}>
               <InputLabel htmlFor="outlined-age-native-simple">Schematic</InputLabel>
               <Select
