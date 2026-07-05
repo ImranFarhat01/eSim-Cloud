@@ -561,7 +561,7 @@ class LTIPostGrade(APIView):
         schematic.shared = True
         schematic.is_submission = True
         schematic.save()
-        if(sim):
+        if(sim and consumer.test_case):
             score, comparison_result = process_submission(
                 consumer.test_case.result, sim.result, consumer.sim_params)
         else:
@@ -649,7 +649,7 @@ class ArduinoLTIPostGrade(APIView):
         schematic.shared = True
         schematic.is_submission = True
         schematic.save()
-        if(sim):
+        if(sim and consumer.test_case):
             score, evaluated = arduino_eval(consumer.test_case.result,
                                             sim.result, consumer.con_weightage,
                                             consumer.score)
