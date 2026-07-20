@@ -86,6 +86,7 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
   const [computedExpressions, setComputedExpressions] = React.useState([])
   const [expressionDraft, setExpressionDraft] = React.useState('')
   const [expressionDraftError, setExpressionDraftError] = React.useState('')
+  const [expressionNameDraft, setExpressionNameDraft] = React.useState('')
   const [showExpressionPanel, setShowExpressionPanel] = React.useState(false)
   const precisionArr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   const scalesNonGraph = []
@@ -485,10 +486,11 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
       compileExpression(expressionDraft, lookup, graphData.x_points.length)
       setComputedExpressions((prev) => [
         ...prev,
-        { id: `expr-${Date.now()}-${prev.length}`, expression: expressionDraft, visible: true }
+        { id: `expr-${Date.now()}-${prev.length}`, expression: expressionDraft, visible: true, name: expressionNameDraft.trim() || null }
       ])
       setExpressionDraft('')
       setExpressionDraftError('')
+      setExpressionNameDraft('')
     } catch (e) {
       setExpressionDraftError(e instanceof ExpressionError ? e.message : 'Invalid expression')
     }
@@ -877,7 +879,7 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
                                   {computedExpressions.map((expr, idx) => {
                                     const isChecked = expr.visible !== false
                                     const color = defaultColors[(idx + 4) % defaultColors.length]
-                                    const displayName = expr.expression.replace(/[{}]/g, '')
+                                    const displayName = expr.name || expr.expression.replace(/[{}]/g, '')
                                     return (
                                       <label
                                         key={expr.id}
@@ -943,6 +945,14 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
                                   style={{ minWidth: '260px', flex: 1 }}
                                   error={!!expressionDraftError}
                                 />
+                                <TextField
+                                  variant="outlined"
+                                  size="small"
+                                  placeholder="Name (optional)"
+                                  value={expressionNameDraft}
+                                  onChange={(e) => setExpressionNameDraft(e.target.value)}
+                                  style={{ minWidth: '140px' }}
+                                />
                                 <FormControl variant="outlined" size="small" style={{ minWidth: '160px' }}>
                                   <InputLabel>Insert signal</InputLabel>
                                   <Select
@@ -975,8 +985,11 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                     {computedExpressions.map((expr) => (
                                       <div key={expr.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                                        <span style={{ fontFamily: 'monospace', backgroundColor: '#e4e6eb', padding: '2px 8px', borderRadius: '4px' }}>
-                                          {expr.expression.replace(/[{}]/g, '')}
+                                        <span
+                                          title={expr.expression.replace(/[{}]/g, '')}
+                                          style={{ fontFamily: expr.name ? 'inherit' : 'monospace', backgroundColor: '#e4e6eb', padding: '2px 8px', borderRadius: '4px' }}
+                                        >
+                                          {expr.name || expr.expression.replace(/[{}]/g, '')}
                                         </span>
                                         {computedErrors[expr.id] && (
                                           <span style={{ color: '#c62828' }}>{computedErrors[expr.id]}</span>
