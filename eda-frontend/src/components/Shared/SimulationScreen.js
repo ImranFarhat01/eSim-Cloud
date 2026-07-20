@@ -24,6 +24,7 @@ import api from '../../utils/Api'
 import queryString from 'query-string'
 
 import Graph from './Graph'
+import { buildSignalLookup, evaluateExpressionSeries, compileExpression, ExpressionError } from '../../utils/expressionEvaluator'
 import { GetProbeNodes } from '../SchematicEditor/Helper/ToolbarTools'
 
 const FileSaver = require('file-saver')
@@ -82,6 +83,10 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
   const [visibleSignals, setVisibleSignals] = React.useState({})
   const [showSignalsBar, setShowSignalsBar] = React.useState(true)
   const [showPeaks, setShowPeaks] = React.useState(false)
+  const [computedExpressions, setComputedExpressions] = React.useState([])
+  const [expressionDraft, setExpressionDraft] = React.useState('')
+  const [expressionDraftError, setExpressionDraftError] = React.useState('')
+  const [showExpressionPanel, setShowExpressionPanel] = React.useState(false)
   const precisionArr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   const scalesNonGraph = []
   const scalesNonGraphCompare = []
@@ -290,6 +295,38 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
   }
   const [filteredGraph, setFilteredGraph] = React.useState(null)
 
+  // Single source of truth for 'the graph result we should read from'.
+  // ngspice's raw output sometimes repeats the x-axis label (e.g. 'time')
+  // as if it were its own plotted signal - Graph.js already guards against
+  // drawing it as a line (`if (labels[0] === labels[i + 1]) continue`), but
+  // that guard only lived inside chart-drawing, so the duplicate still
+  // leaked into the signal-picker lists and could be referenced (as
+  // meaningless time-vs-time) inside a computed expression. Every place
+  // that reads the current graph result goes through this function so the
+  // duplicate is filtered out exactly once, everywhere, rather than
+  // patched separately in each consumer.
+  const getEffectiveGraphData = () => {
+    const raw = filteredGraph || result.graph
+    if (!raw || !raw.labels) return raw
+
+    const labels = [raw.labels[0]]
+    const yPoints = []
+    const probeColors = {}
+    let nextIndex = 1
+
+    for (let i = 1; i < raw.labels.length; i++) {
+      if (raw.labels[i] === raw.labels[0]) continue // skip duplicate x-axis entry
+      labels.push(raw.labels[i])
+      yPoints.push(raw.y_points[i - 1])
+      if (raw.probeColors && raw.probeColors[i]) {
+        probeColors[nextIndex] = raw.probeColors[i]
+      }
+      nextIndex++
+    }
+
+    return { ...raw, labels, y_points: yPoints, probeColors }
+  }
+
   useEffect(() => {
     if (isResult === true) {
       let g, val, idx
@@ -385,7 +422,7 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
   }, [isResult])
 
   const getSignalsList = () => {
-    const graphData = filteredGraph || result.graph
+    const graphData = getEffectiveGraphData()
     if (!graphData || !graphData.labels) return []
 
     const list = []
@@ -410,8 +447,64 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
     }))
   }
 
+  // Resolves every saved computed expression against a given graph result.
+  // Returns { resolved: [{id, label, color, data}], errors: {id: message} } -
+  // an expression that fails (e.g. references a signal that no longer
+  // exists after a re-simulation) shows up in `errors` and is simply
+  // omitted from `resolved`; it never throws out of this function, and
+  // never affects any other expression or the real probed signals.
+  const resolveComputedExpressions = (graphData) => {
+    const resolved = []
+    const errors = {}
+    if (!graphData || !graphData.labels || !graphData.x_points) {
+      return { resolved, errors }
+    }
+    const lookup = buildSignalLookup(graphData.labels, graphData.y_points)
+    const expectedLength = graphData.x_points.length
+    computedExpressions.forEach((expr, idx) => {
+      try {
+        const data = evaluateExpressionSeries(expr.expression, lookup, expectedLength)
+        resolved.push({
+          id: expr.id,
+          label: expr.expression.replace(/[{}]/g, ''),
+          color: defaultColors[(idx + 4) % defaultColors.length],
+          data
+        })
+      } catch (e) {
+        errors[expr.id] = e instanceof ExpressionError ? e.message : 'Failed to evaluate expression'
+      }
+    })
+    return { resolved, errors }
+  }
+
+  const handleAddExpression = () => {
+    const graphData = getEffectiveGraphData()
+    if (!graphData || !graphData.labels || !graphData.x_points) return
+    const lookup = buildSignalLookup(graphData.labels, graphData.y_points)
+    try {
+      compileExpression(expressionDraft, lookup, graphData.x_points.length)
+      setComputedExpressions((prev) => [
+        ...prev,
+        { id: `expr-${Date.now()}-${prev.length}`, expression: expressionDraft }
+      ])
+      setExpressionDraft('')
+      setExpressionDraftError('')
+    } catch (e) {
+      setExpressionDraftError(e instanceof ExpressionError ? e.message : 'Invalid expression')
+    }
+  }
+
+  const handleRemoveExpression = (id) => {
+    setComputedExpressions((prev) => prev.filter((e) => e.id !== id))
+  }
+
+  const handleInsertSignal = (signalName) => {
+    setExpressionDraft((prev) => `${prev}{${signalName}}`)
+    setExpressionDraftError('')
+  }
+
   const getFilteredGraphData = () => {
-    const graphData = filteredGraph || result.graph
+    const graphData = getEffectiveGraphData()
     if (!graphData || !graphData.labels) return null
 
     const labels = [graphData.labels[0]]
@@ -432,6 +525,14 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
       }
     }
 
+    const { resolved: computedResolved } = resolveComputedExpressions(graphData)
+    computedResolved.forEach((trace) => {
+      labels.push(trace.label)
+      yPoints.push(trace.data)
+      probeColors[nextIndex] = trace.color
+      nextIndex++
+    })
+
     return {
       labels,
       x_points: graphData.x_points,
@@ -441,7 +542,7 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
   }
 
   React.useEffect(() => {
-    const graphData = filteredGraph || result.graph
+    const graphData = getEffectiveGraphData()
     if (graphData && graphData.labels && graphData.labels.length > 1) {
       const initialVisible = {}
       for (let i = 1; i < graphData.labels.length; i++) {
@@ -601,8 +702,15 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
     setNotation(evt.target.value)
   }
   const generateCSV = () => {
+    // Export the same data the graph is actually showing - includes
+    // computed traces, respects Toggle Signals visibility, and is
+    // already de-duplicated of the raw 'time' artifact - rather than
+    // the untouched raw simulation result.
+    const graphData = getFilteredGraphData()
+    if (!graphData || !graphData.labels) return ''
+
     let headings = ''
-    result.graph.labels.forEach(label => {
+    graphData.labels.forEach(label => {
       headings = headings + label + ','
     })
 
@@ -610,10 +718,10 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
     headings += '\n'
     let downloadString = ''
 
-    for (let x = 0; x < result.graph.x_points.length; x++) {
-      downloadString += result.graph.x_points[x]
-      for (let y = 0; y < result.graph.y_points.length; y++) {
-        downloadString = downloadString + ',' + result.graph.y_points[y][x]
+    for (let x = 0; x < graphData.x_points.length; x++) {
+      downloadString += graphData.x_points[x]
+      for (let y = 0; y < graphData.y_points.length; y++) {
+        downloadString = downloadString + ',' + graphData.y_points[y][x]
       }
       downloadString += '\n'
     }
@@ -760,6 +868,80 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
                                   })}
                                 </div>
                               </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {result.isGraph === 'true' && !compare && (
+                        <div style={{ marginBottom: '15px', backgroundColor: '#f0f2f5', padding: '12px 16px', borderRadius: '4px', border: '1px solid #dcdcdc' }}>
+                          <div
+                            onClick={() => setShowExpressionPanel(!showExpressionPanel)}
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold', color: '#4b5563', fontSize: '13px', cursor: 'pointer', userSelect: 'none' }}
+                          >
+                            <span style={{ fontSize: '10px', transform: `scale(0.85) rotate(${showExpressionPanel ? 90 : 0}deg)`, display: 'inline-block' }}>{'\u25B6'}</span>
+                            <span>Computed Traces{computedExpressions.length > 0 ? ` (${computedExpressions.length})` : ''}</span>
+                          </div>
+                          {showExpressionPanel && (
+                            <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                <TextField
+                                  variant="outlined"
+                                  size="small"
+                                  placeholder="e.g. {V(1)} - {V(2)}"
+                                  value={expressionDraft}
+                                  onChange={(e) => { setExpressionDraft(e.target.value); setExpressionDraftError('') }}
+                                  style={{ minWidth: '260px', flex: 1 }}
+                                  error={!!expressionDraftError}
+                                />
+                                <FormControl variant="outlined" size="small" style={{ minWidth: '160px' }}>
+                                  <InputLabel>Insert signal</InputLabel>
+                                  <Select
+                                    label="Insert signal"
+                                    value=""
+                                    onChange={(e) => handleInsertSignal(e.target.value)}
+                                  >
+                                    {getSignalsList().map((sig) => (
+                                      <MenuItem key={sig.name} value={sig.name}>{sig.name}</MenuItem>
+                                    ))}
+                                  </Select>
+                                </FormControl>
+                                <Button
+                                  variant="contained"
+                                  color="primary"
+                                  size="small"
+                                  onClick={handleAddExpression}
+                                  disabled={!expressionDraft.trim()}
+                                >
+                                  Add
+                                </Button>
+                              </div>
+                              {expressionDraftError && (
+                                <div style={{ color: '#c62828', fontSize: '12px' }}>{expressionDraftError}</div>
+                              )}
+                              {computedExpressions.length > 0 && (() => {
+                                const graphDataForErrors = getEffectiveGraphData()
+                                const { errors: computedErrors } = resolveComputedExpressions(graphDataForErrors)
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                    {computedExpressions.map((expr) => (
+                                      <div key={expr.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                                        <span style={{ fontFamily: 'monospace', backgroundColor: '#e4e6eb', padding: '2px 8px', borderRadius: '4px' }}>
+                                          {expr.expression.replace(/[{}]/g, '')}
+                                        </span>
+                                        {computedErrors[expr.id] && (
+                                          <span style={{ color: '#c62828' }}>{computedErrors[expr.id]}</span>
+                                        )}
+                                        <span
+                                          onClick={() => handleRemoveExpression(expr.id)}
+                                          style={{ cursor: 'pointer', color: '#6b7280', fontWeight: 'bold' }}
+                                        >
+                                          {'\u00D7'}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              })()}
                             </div>
                           )}
                         </div>
