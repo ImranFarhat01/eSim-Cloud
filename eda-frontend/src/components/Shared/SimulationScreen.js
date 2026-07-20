@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import PropTypes from 'prop-types'
 import {
   Button,
@@ -305,7 +305,7 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
   // that reads the current graph result goes through this function so the
   // duplicate is filtered out exactly once, everywhere, rather than
   // patched separately in each consumer.
-  const getEffectiveGraphData = () => {
+  const getEffectiveGraphData = useCallback(() => {
     const raw = filteredGraph || result.graph
     if (!raw || !raw.labels) return raw
 
@@ -325,7 +325,7 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
     }
 
     return { ...raw, labels, y_points: yPoints, probeColors }
-  }
+  }, [filteredGraph, result.graph])
 
   useEffect(() => {
     if (isResult === true) {
@@ -485,7 +485,7 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
       compileExpression(expressionDraft, lookup, graphData.x_points.length)
       setComputedExpressions((prev) => [
         ...prev,
-        { id: `expr-${Date.now()}-${prev.length}`, expression: expressionDraft }
+        { id: `expr-${Date.now()}-${prev.length}`, expression: expressionDraft, visible: true }
       ])
       setExpressionDraft('')
       setExpressionDraftError('')
@@ -496,6 +496,12 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
 
   const handleRemoveExpression = (id) => {
     setComputedExpressions((prev) => prev.filter((e) => e.id !== id))
+  }
+
+  const handleToggleExpressionVisibility = (id) => {
+    setComputedExpressions((prev) => prev.map((e) =>
+      e.id === id ? { ...e, visible: e.visible === false } : e
+    ))
   }
 
   const handleInsertSignal = (signalName) => {
@@ -527,6 +533,8 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
 
     const { resolved: computedResolved } = resolveComputedExpressions(graphData)
     computedResolved.forEach((trace) => {
+      const exprState = computedExpressions.find((e) => e.id === trace.id)
+      if (exprState && exprState.visible === false) return
       labels.push(trace.label)
       yPoints.push(trace.data)
       probeColors[nextIndex] = trace.color
@@ -550,7 +558,7 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
       }
       setVisibleSignals(initialVisible)
     }
-  }, [filteredGraph, result.graph])
+  }, [filteredGraph, result.graph, getEffectiveGraphData])
 
   // DO NOT CHANGE
   const addScalesNonGraph = (g, data, arr, scale, setScaleFunc, setStateFunc) => {
@@ -863,6 +871,48 @@ export default function SimulationScreen ({ open, close, isResult, taskId, simTy
                                           }}
                                         />
                                         <span>{sig.name}</span>
+                                      </label>
+                                    )
+                                  })}
+                                  {computedExpressions.map((expr, idx) => {
+                                    const isChecked = expr.visible !== false
+                                    const color = defaultColors[(idx + 4) % defaultColors.length]
+                                    const displayName = expr.expression.replace(/[{}]/g, '')
+                                    return (
+                                      <label
+                                        key={expr.id}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '6px',
+                                          padding: '3px 8px',
+                                          borderRadius: '4px',
+                                          backgroundColor: '#e4e6eb',
+                                          cursor: 'pointer',
+                                          userSelect: 'none',
+                                          fontSize: '11px',
+                                          fontWeight: 'bold',
+                                          color: color,
+                                          border: '1px dashed #cbd5e1',
+                                          transition: 'background-color 0.2s',
+                                          boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                        }}
+                                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#d8dadf' }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#e4e6eb' }}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          onChange={() => handleToggleExpressionVisibility(expr.id)}
+                                          style={{
+                                            cursor: 'pointer',
+                                            accentColor: color,
+                                            width: '13px',
+                                            height: '13px',
+                                            margin: 0
+                                          }}
+                                        />
+                                        <span>{displayName}</span>
                                       </label>
                                     )
                                   })}
